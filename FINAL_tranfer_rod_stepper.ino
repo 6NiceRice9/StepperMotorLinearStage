@@ -98,7 +98,6 @@ void setup() {
 
 void loop() 
 {
-  // Serial.begin(9600);
     if (emergencyOFF == 0)    // dont start, if button is pressen during boot or the encoder has been rotated during fast motor speed
     {
         if (digitalRead(button) == 0 && acceleration == true)   // button is pressed, acceleration in process
@@ -109,41 +108,34 @@ void loop()
                 }
             }      
         if (digitalRead(button) == 0 && acceleration == false)    // Button pressed & acceleration is done
-            // Serial.println("Button is pressed & acceleration is done");
-            if(triggerEncoder == true)                            
+            if(triggerEncoder == true)                            // emergency stop + delay to prevent acceleration
             {
-                // Serial.println("Emergency stop: encoder has been moved + delay.");        // emergency stop + delay to prevent acceleration
                 noInterrupts();
                 Deacceleration();
                 emergencyOFF = 1;
                 interrupts();
                 delay(3000);
                 StepperMotorSTOP();
-                // Serial.println("Emergency stop: done."); 
             }
             else
             {
-                // Serial.println("Fast Mode: keep motor @ const. speed"); // else keep motor @ const speed
-                KeepSpeed();
+                KeepSpeed();                                       // else keep motor @ const speed
             }
         if (digitalRead(button) == 1 && acceleration == false)    // button released, deacceleration in process
         { 
             if (endOfDeacceleration == false)
             {
-                // Serial.println("Deacceleration is in process ...");
                 Deacceleration();
-                // Serial.println("Deacceleration: done");
             }
         }
         if (digitalRead(button) == 1 && triggerEncoder == true)   // button released & encoder is rotated == normal usage
         {
-            // Serial.println("Normal Mode");
             StepperMotorRUN();
             encoderTrigger();
         }
         StepperMotorOFF();
-    } //// emergency section OR power ON section
-    else
+    } 
+    else                                                         // emergency section OR power ON section
     {
       StepperMotorOFF();
       buttonState = digitalRead(button);
@@ -189,7 +181,6 @@ void StepperMotorRUN()
 
 void StepperMotorSTOP() // stop motor rotation, if  direction of rotation encoder has changed
 {
-    // Serial.println("STOPPED");
     StepperMotor.stop();
     delay(500);
     triggerEncoder = false;   // true == encoder has been rotated
@@ -199,25 +190,19 @@ void StepperMotorSTOP() // stop motor rotation, if  direction of rotation encode
 }
 void encoderTrigger()   // counts wrong recognized direction signals
 {
-    // Serial.println("Encoder Trigger: executed");
     if (bool_CW_direction != bool_old_direction)
     {
         encoderTriggerTimer = millis();
         wrongDirectionFlag++;
         bool_old_direction = !bool_CW_direction;    // new diection is wrong == !bool_CW_direction (opposit of new direction = old direction)
-            Serial.print(wrongDirectionFlag);
-            Serial.print(" <-- before reset\t");
         if (wrongDirectionFlag > 10)
         {   
             wrongDirectionFlag = 0;
             StepperMotorSTOP();
-
         }
         if (millis() - encoderTriggerTimer > 1000)
         {
             wrongDirectionFlag = 0;
-            Serial.print("after reset -->");
-            Serial.println(wrongDirectionFlag);
         }  
     }
 }
