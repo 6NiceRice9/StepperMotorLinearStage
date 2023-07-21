@@ -31,7 +31,7 @@
     
     To stop the motor, rotate slightly in counterclockwise direction. (= motor stops & block the operation for 500 ms & blocks coarse movement till next fine movement)
     
-    After 500 ms, its unlocked for fine movement by rotary encoder. --> to enable coarse movement, rotate in the desired direction
+    After 500 ms, its unlocked for fine movement by rotary encoder. --> to unlock coarse movement, rotate in the desired direction
     
 7.  If higher precision is required, the motor could be rotated manually, since the motor is powered off every 3s.
 
