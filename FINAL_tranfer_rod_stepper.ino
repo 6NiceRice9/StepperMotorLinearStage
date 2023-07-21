@@ -169,7 +169,7 @@ void InterruptEncPinA()
         bool_CW_direction = false;
         encoderValue--;
     }
-    motorOffFor5Seconds = millis();   // start timer, to calculate the power off time, since last action
+    motorOffFor5Seconds = millis();   // start power off/hybernation counter
     digitalWrite(stepperENA, LOW);  // power on the stepper motor driver
 }
 
@@ -211,7 +211,7 @@ void StepperMotorOFF()
   if ((StepperMotor.isRunning() == false) && ((millis() - motorOffFor5Seconds) > counterInterval))
   {
       encoderValue = 0;
-      motorOffFor5Seconds = millis();
+      motorOffFor5Seconds = millis();    // start power off/hybernation counter
       StepperMotor.stop();
       digitalWrite(stepperENA, HIGH);   // power off the stepper motor driver
       StepperMotor.setCurrentPosition(encoderValue);
@@ -249,7 +249,7 @@ void Acceleration()   // acceleration step of the motor
         acceleration = false;           // false == no acceleration required == full speed rotation of the motor
         endOfDeacceleration = false;    // false == because now, its runs at full speed // (true when the motor stopped)
     }
-    motorOffFor5Seconds = millis();
+    motorOffFor5Seconds = millis();    // start power off/hybernation counter
 }
 void KeepSpeed()    // keep motor @ const speed & as long the button is pressed
 {
@@ -283,7 +283,7 @@ void Deacceleration()
     triggerEncoder = true;   // true == encoder has been rotated
     oldEncoderValue = encoderValue;
     StepperMotor.setCurrentPosition(encoderValue);    // overwrite motor position to the actual encoder value
-    motorOffFor5Seconds = millis();
+    motorOffFor5Seconds = millis();                    // start power off/hybernation counter
 }
 
 void ButtonTimeFalling()
@@ -296,5 +296,5 @@ void ButtonTimeFalling()
 void ButtonTimeRising()
 {
   oldButtonTime = buttonTime;   // reset button timer
-  buttonCount = 1;              // required to unlock the device (first 3 button presses after power off)
+  buttonCount = 1;              // required to unlock the device (first 2 button presses after power off)
 }
