@@ -7,7 +7,8 @@
 /// - bug: after reotation encoder, let the motor go to sleeping mode, press the button once and immeadeatly rotate the encoder -->> uncontrolled acceleration + deacceleration in the encoder rotated direction
 /// - bug fixed
 /// - prevent post rotation
-/// - added full stop during fast rotation
+/// - added full stop during fast rotation (better alternative to slow deacceleration)
+/// - had to update with MotorPosition(encoderValue): prevents acceleration immedeatly after unlock (in case the encoder has been rotated between button pushes)
 /// -------------------- Instruction --------------------
 /// 1. after powerUP: press the button 2x
 /// 2. every 3 seconds after last operation, the motor shuts down
@@ -28,11 +29,12 @@ long de_accel_time_reduction_factor = 2;
 int power_off_counter_interval_ms = 2000;   // time until powerOFF motor (default= 3200 ms)
 // ---------------------------------------------------------------------------------------------------------------------
 // SLOW ROTATION:
-long step_multiplicator = 1;             // multiply encoderValue by this value -->> never value <= 1, see below
-long reduce_steps = 3;                  // values >= 1; ... encoder steps will be divided by this value (to reduce amount of steps == prevents post roration after encoder stopped his motion)
-unsigned long setMaxSpeed = 4000;      // accelStepper library (default = 1000 ... larger value == faster) == used to control stepper motor rotation during encoder rotation
+// int step_multiplicator = 1;             // multiply encoderValue by this value -->> never value <= 1, see below
+unsigned long setMaxSpeed = 7000;      // accelStepper library (default = 1000 ... larger value == faster) == used to control stepper motor rotation during encoder rotation
 unsigned int setAcceleration = 7000;  // accelStepper library (default = 1000 ... larger value == faster) == used to control stepper motor rotation during encoder rotation
 // ---------------------------------------------------------------------------------------------------------------------
+// press x times: to unlock
+int button_unlock = 3;    // how many times to press the button to unlock
 // ---------------------------------------------------------------------------------------------------------------------
 
 #include <math.h>         // to use round()
@@ -57,8 +59,8 @@ extern volatile unsigned long oldButtonTime = 0;
 #define encoderPinB 3
 
 // value encoder
-volatile long encoderValue = 0;
-volatile long oldEncoderValue = 0;
+volatile long encoderValue = 3000;
+volatile long oldEncoderValue = 3000;
 volatile bool bool_CW_direction = false;   // define direction of the rotation
 volatile bool bool_old_direction = false;  // define old direction
 volatile int wrongDirectionFlag = 0;         // treshhold for wrong direction trigger (in case of fast encoder rotation)
@@ -78,7 +80,7 @@ AccelStepper StepperMotor(AccelStepper::FULL2WIRE, stepperPUL, stepperDIR);
 
 
 void setup() {
-
+// Serial.begin(9600);
     // button
     pinMode(button, INPUT_PULLUP);
     buttonState = digitalRead(button);
@@ -103,7 +105,7 @@ void setup() {
     pinMode(stepperDIR, OUTPUT);
     pinMode(stepperENA, OUTPUT);
     digitalWrite(stepperENA, HIGH);   // power off the stepper motor driver
-    StepperMotor.setCurrentPosition(0);              // SET   actual position = 0
+    StepperMotor.setCurrentPosition(encoderValue);              // SET   actual position = 0
     StepperMotor.setMaxSpeed(setMaxSpeed);             // SPEED = Steps / sec
     StepperMotor.setAcceleration(setAcceleration);    // ACCELERATION = Steps /(sec)^2 
 
@@ -124,7 +126,7 @@ void loop()
             if(encoder_is_moving == true)                            // emergency stop + delay to prevent acceleration
             {
                 noInterrupts();
-                //Deacceleration();
+                // Deacceleration();
                 //////// added temporary: instead of Deacceleration();, to have an emergency stop during full speed motor rotation
                 StepperMotor.stop();
                 motor_need_acceleration = true;    // true == need to accelerate again
@@ -138,7 +140,7 @@ void loop()
 
                 emergencyOFF = 1;
                 interrupts();
-                delay(2000);
+                delay(1500);
                 StepperMotorSTOP();
             }
             else
@@ -163,18 +165,20 @@ void loop()
     {
       StepperMotorOFF();
       buttonState = digitalRead(button);
-      if (buttonCounts < 2 && buttonCount == 1)
+      if (buttonCounts < button_unlock && buttonCount == 1)
       {
         buttonCounts++;
         buttonCount = 0;    // reset button count;
       }
       else
       {
-          if (buttonCounts >= 2)    // after 5x times pressing button, change the flag & return into normal mode
+          if (buttonCounts >= button_unlock)    // after 5x times pressing button, change the flag & return into normal mode
           {
               emergencyOFF = 0;   // 0 == alarm off
               buttonCounts = 0;   // reset button count
+              StepperMotor.setCurrentPosition(encoderValue);
               StepperMotorSTOP(); // if encoder has been rotated during unlock time = prevents to seek for new position
+
           }
       } 
     }
@@ -193,6 +197,11 @@ void InterruptEncPinA()
         bool_CW_direction = false;
         encoderValue--;
     }
+    if (abs(encoderValue) > 50000)    // reset the encoder counter to avoid overflow (uncontrolled single acceleration occure)
+    {
+      encoderValue = 3000;
+      StepperMotor.setCurrentPosition(encoderValue);
+    }
     _motor_hibernation_time_ms = millis();   // start power off/hybernation counter
     hibernation_on = false;   // wanking up from hibernation mode
     digitalWrite(stepperENA, LOW);  // power on the stepper motor driver
@@ -200,8 +209,9 @@ void InterruptEncPinA()
 
 void StepperMotorRUN()
 {   
-    StepperMotor.moveTo(round((encoderValue * step_multiplicator)/reduce_steps));   // step_multiplicator should be never negative (never change destination == uncontrolled rotation without STOP condition: DANGER!!!)
+    StepperMotor.moveTo(encoderValue);   // step_multiplicator should be never negative (never change destination == uncontrolled rotation without STOP condition: DANGER!!!)
     StepperMotor.run();
+    
 }
 
 void StepperMotorSTOP() // stop motor rotation, if  direction of rotation encoder has changed
@@ -240,7 +250,7 @@ void StepperMotorOFF()
       _motor_hibernation_time_ms = millis();    // start power off/hybernation counter
       StepperMotor.stop();
       digitalWrite(stepperENA, HIGH);   // power off the stepper motor driver
-      StepperMotor.setCurrentPosition(encoderValue);
+      StepperMotor.setCurrentPosition(encoderValue);    // when the encoder has been rotated during button press, prevent acceleration after unlock
       hibernation_on = true;    // go to hibernation mode
   }
 }
