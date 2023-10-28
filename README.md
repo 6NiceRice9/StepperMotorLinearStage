@@ -1,4 +1,4 @@
-## StepperMotorLinearStage
+## Steper motor operates a linear actuator
 
 -------------------- Instruction --------------------
 
