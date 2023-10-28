@@ -6,23 +6,36 @@
 /// - all safety features included
 /// - bug: after reotation encoder, let the motor go to sleeping mode, press the button once and immeadeatly rotate the encoder -->> uncontrolled acceleration + deacceleration in the encoder rotated direction
 /// - bug fixed
+/// - prevent post rotation
+/// - added full stop during fast rotation
 /// -------------------- Instruction --------------------
 /// 1. after powerUP: press the button 2x
 /// 2. every 3 seconds after last operation, the motor shuts down
 /// 3. after shutting down, the motor has to be moved in thed direction of the acceleration & in the next 3 seconds the button for the acceleratio has to be pressed
 /// 4. in case of :button is pressed & motor spins fast, rotation encoder is moved = then safty deacceleration and time delay of 3000 ms & 1 button press
-/// 5. adjust the speed & accelDeaccerationTime !!!
+/// 5. adjust the pulse_speed_ms & accel_time_ms !!!
 /// ------------------------------------------------------
 
 // ---------------------------------------------------------------------------------------------------------------------
 // ---------------------adjust these values ----------------------------------------------------------------------------------
 // ---------------------------------------------------------------------------------------------------------------------
-volatile long speed = 600;    // time to create pulse signal (smaller == FASTER motor rotation) (default = 600)     -->>> maybe: 300 == 400 mm in 60s
-volatile long accelDeaccerationTime = 625;    // millicesonds to reach full speed -/- full stop [larger == slower] (default = 625)
-int counterInterval_ms = 3000;   // time until powerOFF motor (default= 3200 ms)
-unsigned int stepMultiplyFactor = 1;  // multiply encoderValue by this value -->> never NEGATIVE, see below
+// FAST RORATION:
+volatile long pulse_speed_ms = 500;              // time to create pulse signal (smaller == FASTER motor rotation) (default = 600)     -->>> maybe: 300 == 400 mm in 60s
+volatile long accel_time_ms = 500;              // millicesonds to reach full speed -/- full stop [larger == slower] (default = 625)
+volatile long de_accel_time_ms = 500;
+long accel_time_reduction_factor = 2;         // [larger == slower] (default = 1)
+long de_accel_time_reduction_factor = 2;
+int power_off_counter_interval_ms = 2000;   // time until powerOFF motor (default= 3200 ms)
+// ---------------------------------------------------------------------------------------------------------------------
+// SLOW ROTATION:
+long step_multiplicator = 1;             // multiply encoderValue by this value -->> never value <= 1, see below
+long reduce_steps = 3;                  // values >= 1; ... encoder steps will be divided by this value (to reduce amount of steps == prevents post roration after encoder stopped his motion)
+unsigned long setMaxSpeed = 4000;      // accelStepper library (default = 1000 ... larger value == faster) == used to control stepper motor rotation during encoder rotation
+unsigned int setAcceleration = 7000;  // accelStepper library (default = 1000 ... larger value == faster) == used to control stepper motor rotation during encoder rotation
 // ---------------------------------------------------------------------------------------------------------------------
 // ---------------------------------------------------------------------------------------------------------------------
+
+#include <math.h>         // to use round()
 
 // handling time
 extern volatile unsigned long _motor_hibernation_time_ms = 0;
@@ -30,14 +43,13 @@ extern volatile unsigned long _motor_hibernation_time_ms = 0;
 
 // TurboButton
 #define button 7
-volatile bool acceleration = true;  // true: need to accelerate     // false:already accelerated
-volatile long triggerAccel = 100;
+volatile bool motor_need_acceleration = true;  // true: acceleration required     // false:already accelerated
 int emergencyOFF = 1;
 int buttonState;
 volatile bool hibernation_on = true;
 int buttonCount = 0;
 int buttonCounts = 0;
-extern volatile unsigned long buttonTime = 0;
+extern volatile unsigned long button_time_ms = 0;
 extern volatile unsigned long oldButtonTime = 0;
 
 // rotary encoder
@@ -47,11 +59,10 @@ extern volatile unsigned long oldButtonTime = 0;
 // value encoder
 volatile long encoderValue = 0;
 volatile long oldEncoderValue = 0;
-volatile long diffEncoderValue = 0;
 volatile bool bool_CW_direction = false;   // define direction of the rotation
 volatile bool bool_old_direction = false;  // define old direction
 volatile int wrongDirectionFlag = 0;         // treshhold for wrong direction trigger (in case of fast encoder rotation)
-volatile bool triggerEncoder = false;     // if encoder is rotated, then == true
+volatile bool encoder_is_moving = false;     // if encoder is rotated, then == true
 extern volatile unsigned long encoderTriggerTimer = 0;
 
 // stepper motor (used only to activate the stepper motor)
@@ -59,8 +70,6 @@ extern volatile unsigned long encoderTriggerTimer = 0;
 #define stepperPUL 4
 #define stepperDIR 5
 #define stepperENA 6
-unsigned long setMaxSpeed = 1000;     // accelStepper library (default = 1000) == no effecte, since library not in use
-unsigned int setAcceleration = 1000;  // accelStepper library (default = 1000) == no effecte, since library not in use
 volatile bool endOfDeacceleration = true;
 volatile bool directoinAccelSpeedDeaccel = -1;    // in case of encoder has changed direction during acceleration, so deacceleration stays in the same direction
 
@@ -104,35 +113,46 @@ void loop()
 {
     if (emergencyOFF == 0)    // dont start, if button is pressen during boot or the encoder has been rotated during fast motor speed
     {
-        if (hibernation_on == false && digitalRead(button) == 0 && acceleration == true)   // not in hibernation mode, button is pressed, acceleration is in process
+        if (hibernation_on == false && digitalRead(button) == 0 && motor_need_acceleration == true)   // not in hibernation mode, button is pressed, acceleration is in process
             {  
-                if (triggerEncoder == true) 
+                if (encoder_is_moving == true) 
                 {   
                     Acceleration();
                 }
             }      
-        if (digitalRead(button) == 0 && acceleration == false)    // Button pressed & acceleration is done
-            if(triggerEncoder == true)                            // emergency stop + delay to prevent acceleration
+        if (digitalRead(button) == 0 && motor_need_acceleration == false)    // Button pressed & acceleration is done
+            if(encoder_is_moving == true)                            // emergency stop + delay to prevent acceleration
             {
                 noInterrupts();
-                Deacceleration();
+                //Deacceleration();
+                //////// added temporary: instead of Deacceleration();, to have an emergency stop during full speed motor rotation
+                StepperMotor.stop();
+                motor_need_acceleration = true;    // true == need to accelerate again
+                endOfDeacceleration = true;   // true == deacceleration is done
+                encoderValue = 0;         // reset encodet value
+                encoder_is_moving = true;   // true == encoder has been rotated
+                oldEncoderValue = encoderValue;
+                StepperMotor.setCurrentPosition(encoderValue);    // overwrite motor position to the actual encoder value
+                _motor_hibernation_time_ms = millis();                    // start power off/hybernation counter
+                //////// added temporary
+
                 emergencyOFF = 1;
                 interrupts();
-                delay(3000);
+                delay(2000);
                 StepperMotorSTOP();
             }
             else
             {
                 KeepSpeed();                                       // else keep motor @ const speed
             }
-        if (digitalRead(button) == 1 && acceleration == false)    // button released, deacceleration in process
+        if (digitalRead(button) == 1 && motor_need_acceleration == false)    // button released, deacceleration in process
         { 
             if (endOfDeacceleration == false)
             {
                 Deacceleration();
             }
         }
-        if (digitalRead(button) == 1 && triggerEncoder == true)   // button released & encoder is rotated == normal usage
+        if (digitalRead(button) == 1 && encoder_is_moving == true)   // button released & encoder is rotated == normal usage
         {
             StepperMotorRUN();
             encoderTrigger();
@@ -162,7 +182,7 @@ void loop()
 
 void InterruptEncPinA()
 {   
-    triggerEncoder = true;
+    encoder_is_moving = true;
     if (digitalRead(encoderPinB) == true)
     {
         bool_CW_direction = true;
@@ -180,7 +200,7 @@ void InterruptEncPinA()
 
 void StepperMotorRUN()
 {   
-    StepperMotor.moveTo((encoderValue * stepMultiplyFactor));   // stepMultiplyFactor should be never negative (never reaching destination)
+    StepperMotor.moveTo(round((encoderValue * step_multiplicator)/reduce_steps));   // step_multiplicator should be never negative (never change destination == uncontrolled rotation without STOP condition: DANGER!!!)
     StepperMotor.run();
 }
 
@@ -188,7 +208,7 @@ void StepperMotorSTOP() // stop motor rotation, if  direction of rotation encode
 {
     StepperMotor.stop();
     delay(500);
-    triggerEncoder = false;   // true == encoder has been rotated
+    encoder_is_moving = false;   // true == encoder has been rotated
     encoderValue = 0;   // prevents the stepper motor to seek for the old position
     StepperMotor.setCurrentPosition(encoderValue);
     bool_old_direction = bool_CW_direction; 
@@ -201,7 +221,7 @@ void encoderTrigger()   // counts wrong recognized direction signals
         encoderTriggerTimer = millis();
         wrongDirectionFlag++;
         bool_old_direction = !bool_CW_direction;    // new diection is wrong == !bool_CW_direction (opposit of new direction = old direction)
-        if (wrongDirectionFlag > 10)
+        if (wrongDirectionFlag > 10)    // after n trigger stop rotation
         {   
             wrongDirectionFlag = 0;
             StepperMotorSTOP();
@@ -214,7 +234,7 @@ void encoderTrigger()   // counts wrong recognized direction signals
 }
 void StepperMotorOFF()
 {
-  if ((StepperMotor.isRunning() == false) && ((millis() - _motor_hibernation_time_ms) > counterInterval_ms))
+  if ((StepperMotor.isRunning() == false) && ((millis() - _motor_hibernation_time_ms) > power_off_counter_interval_ms))
   {
       encoderValue = 0;
       _motor_hibernation_time_ms = millis();    // start power off/hybernation counter
@@ -227,67 +247,67 @@ void StepperMotorOFF()
 
 void Acceleration()   // acceleration step of the motor
 {
-    directoinAccelSpeedDeaccel = bool_CW_direction;   // keeps acceleration and deacceleratio in the same direction (in case encoder has chagned direcio during acceleration)
+    directoinAccelSpeedDeaccel = bool_CW_direction;   // keeps acceleration and deacceleratio in the same direction (for the case that the encoder has chagned his direcion during the acceleration time)
     if (directoinAccelSpeedDeaccel == true)   // CW direction
     {
         digitalWrite(stepperDIR, LOW);
-        triggerEncoder = false;
-        for (long i = accelDeaccerationTime; i >= 0; i--)   // start CW acceleration
+        encoder_is_moving = false;
+        for (long i = accel_time_ms; i >= 0; i--)   // start CW acceleration
         {
             digitalWrite(stepperPUL, HIGH);
-            delayMicroseconds ((speed +(i^2)));
+            delayMicroseconds ((pulse_speed_ms + round((i^2) * accel_time_reduction_factor)));
             digitalWrite(stepperPUL, LOW);
-            delayMicroseconds ((speed +(i^2)));
+            delayMicroseconds ((pulse_speed_ms + round((i^2) * accel_time_reduction_factor)));
         }
-        acceleration = false;           // false == no acceleration required == full speed rotation of the motor
+        motor_need_acceleration = false;           // false == no acceleration required == full speed rotation of the motor
         endOfDeacceleration = false;    // false == because now, its runs at full speed // (true when the motor stopped)
     }
     if (directoinAccelSpeedDeaccel == false)
     {
         digitalWrite(stepperDIR, HIGH);
-        triggerEncoder = false;
-        for (long i = accelDeaccerationTime; i >= 0; i--)   // start CCW acceleration
+        encoder_is_moving = false;
+        for (long i = accel_time_ms; i >= 0; i--)   // start CCW acceleration
         {
             digitalWrite(stepperPUL, HIGH);
-            delayMicroseconds ((speed +(i^2)));
+            delayMicroseconds ((pulse_speed_ms + round((i^2) * accel_time_reduction_factor)));
             digitalWrite(stepperPUL, LOW);
-            delayMicroseconds ((speed +(i^2)));
+            delayMicroseconds ((pulse_speed_ms + round((i^2) * accel_time_reduction_factor)));
         }
-        acceleration = false;           // false == no acceleration required == full speed rotation of the motor
+        motor_need_acceleration = false;           // false == no acceleration required == full speed rotation of the motor
         endOfDeacceleration = false;    // false == because now, its runs at full speed // (true when the motor stopped)
     }
     _motor_hibernation_time_ms = millis();    // start power off/hybernation counter
 }
-void KeepSpeed()    // keep motor @ const speed & as long the button is pressed
+void KeepSpeed()    // keep motor @ const pulse_speed_ms & as long the button is pressed
 {
-    if ( triggerEncoder != true && acceleration == false)    // when the encoder trigger is activated = stop const. speed
+    if ( encoder_is_moving != true && motor_need_acceleration == false)    // when the encoder trigger is activated = stop const. speed
     {
-        for (long i = 0; i <= (buttonTime - oldButtonTime); i++)   // how many steps to drive after acceleration
+        for (long i = 0; i <= (button_time_ms - oldButtonTime); i++)   // how many steps to drive after acceleration
         {
             digitalWrite(stepperPUL, HIGH);
-            delayMicroseconds (speed);
+            delayMicroseconds (pulse_speed_ms);
             digitalWrite(stepperPUL, LOW);
-            delayMicroseconds (speed);
+            delayMicroseconds (pulse_speed_ms);
         }
     }
     _motor_hibernation_time_ms = millis();   // reset power OFF timer to avoid power off during holding the button
 }   
 void Deacceleration()
 {
-    if (triggerEncoder == true || digitalRead(button) == 1)
+    if (encoder_is_moving == true || digitalRead(button) == 1)
         {
-            for (long i = 0; i <= (accelDeaccerationTime); i++)   // start deacceleration
+            for (long i = 0; i <= (de_accel_time_ms); i++)   // start deacceleration
             {
               digitalWrite(stepperPUL, HIGH);
-              delayMicroseconds ((speed +(i^2)));
+              delayMicroseconds ((pulse_speed_ms + round((i^2) * de_accel_time_reduction_factor)));
               digitalWrite(stepperPUL, LOW);
-              delayMicroseconds ((speed +(i^2)));
+              delayMicroseconds ((pulse_speed_ms + round((i^2) * de_accel_time_reduction_factor)));
             }
         }
-    acceleration = true;    // true == need to accelerate again
+    motor_need_acceleration = true;    // true == need to accelerate again
     endOfDeacceleration = true;   // true == deacceleration is done
     encoderValue = 0;         // reset encodet value
-    triggerEncoder = true;   // true == encoder has been rotated
+    encoder_is_moving = true;   // true == encoder has been rotated
     oldEncoderValue = encoderValue;
     StepperMotor.setCurrentPosition(encoderValue);    // overwrite motor position to the actual encoder value
     _motor_hibernation_time_ms = millis();                    // start power off/hybernation counter
@@ -295,13 +315,13 @@ void Deacceleration()
 
 void ButtonTimeFalling()
 {
-  triggerEncoder = false; // reset encoder trigger (to enter the main loop)
+  encoder_is_moving = false; // reset encoder trigger (to enter the main loop)
   encoderValue = 0;
-  buttonTime = millis();            // start timer to measure how long the button got pressed
+  button_time_ms = millis();            // start timer to measure how long the button got pressed
   _motor_hibernation_time_ms = millis();   // start timer for power OFF
 }
 void ButtonTimeRising()
 {
-  oldButtonTime = buttonTime;   // reset button timer
+  oldButtonTime = button_time_ms;   // reset button timer
   buttonCount = 1;              // required to unlock the device (first 2 button presses after power off)
 }
