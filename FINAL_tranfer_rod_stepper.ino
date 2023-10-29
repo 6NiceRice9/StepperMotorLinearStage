@@ -9,6 +9,7 @@
 /// - prevent post rotation
 /// - added full stop during fast rotation (better alternative to slow deacceleration)
 /// - had to update with MotorPosition(encoderValue): prevents acceleration immedeatly after unlock (in case the encoder has been rotated between button pushes)
+/// - added custom parameter to control speed and times
 /// -------------------- Instruction --------------------
 /// 1. after powerUP: press the button 2x
 /// 2. every 3 seconds after last operation, the motor shuts down
@@ -21,20 +22,26 @@
 // ---------------------adjust these values ----------------------------------------------------------------------------------
 // ---------------------------------------------------------------------------------------------------------------------
 // FAST RORATION:
-volatile long pulse_speed_ms = 500;              // time to create pulse signal (smaller == FASTER motor rotation) (default = 600)     -->>> maybe: 300 == 400 mm in 60s
-volatile long accel_time_ms = 500;              // millicesonds to reach full speed -/- full stop [larger == slower] (default = 625)
-volatile long de_accel_time_ms = 500;
-long accel_time_reduction_factor = 2;         // [larger == slower] (default = 1)
-long de_accel_time_reduction_factor = 2;
+volatile long pulse_speed_ms = 625;              // time to create pulse signal (smaller == FASTER motor rotation) (default = 600)     -->>> maybe: 300 == 400 mm in 60s
+volatile long accel_time_ms = 625;              // millicesonds to reach full speed -/- full stop [larger == slower] (default = 625)
+volatile long de_accel_time_ms = 625;
+long accel_time_reduction_factor = 1;         // [larger == slower] (default = 1)
+long de_accel_time_reduction_factor = 1;
 int power_off_counter_interval_ms = 2000;   // time until powerOFF motor (default= 3200 ms)
 // ---------------------------------------------------------------------------------------------------------------------
 // SLOW ROTATION:
-// int step_multiplicator = 1;             // multiply encoderValue by this value -->> never value <= 1, see below
-unsigned long setMaxSpeed = 7000;      // accelStepper library (default = 1000 ... larger value == faster) == used to control stepper motor rotation during encoder rotation
-unsigned int setAcceleration = 7000;  // accelStepper library (default = 1000 ... larger value == faster) == used to control stepper motor rotation during encoder rotation
+int punish_time_ms = 60;                     // response time between directions (>=25ms)
+long step_multiplicator = 1;             // multiply encoderValue by this value -->> value > 1, see below
+long step_divisor = 2;                  // divide enciderVlaue by this value > 1
+long steps = 0;                       // private
+unsigned long setMaxSpeed = 20000;      // accelStepper library (default = 1000 ... larger value == faster) == used to control stepper motor rotation during encoder rotation
+unsigned int setAcceleration = 20000;  // accelStepper library (default = 1000 ... larger value == faster) == used to control stepper motor rotation during encoder rotation
 // ---------------------------------------------------------------------------------------------------------------------
 // press x times: to unlock
 int button_unlock = 3;    // how many times to press the button to unlock
+int false_direction_trigger = 5;   // default = 10 ... smaller == more sensitive to encoder motion
+int false_direction_time_slot_ms = 1000;   // after this time, reset trigger to 0. SUM-up the encoder trigger in this time window (smaller slot == faster trigger reset to 0 )
+//
 // ---------------------------------------------------------------------------------------------------------------------
 
 #include <math.h>         // to use round()
@@ -59,8 +66,8 @@ extern volatile unsigned long oldButtonTime = 0;
 #define encoderPinB 3
 
 // value encoder
-volatile long encoderValue = 3000;
-volatile long oldEncoderValue = 3000;
+volatile long encoderValue = 0;
+volatile long oldEncoderValue = 0;
 volatile bool bool_CW_direction = false;   // define direction of the rotation
 volatile bool bool_old_direction = false;  // define old direction
 volatile int wrongDirectionFlag = 0;         // treshhold for wrong direction trigger (in case of fast encoder rotation)
@@ -140,7 +147,7 @@ void loop()
 
                 emergencyOFF = 1;
                 interrupts();
-                delay(1500);
+                delay(1000);
                 StepperMotorSTOP();
             }
             else
@@ -197,27 +204,34 @@ void InterruptEncPinA()
         bool_CW_direction = false;
         encoderValue--;
     }
-    if (abs(encoderValue) > 50000)    // reset the encoder counter to avoid overflow (uncontrolled single acceleration occure)
-    {
-      encoderValue = 3000;
-      StepperMotor.setCurrentPosition(encoderValue);
-    }
     _motor_hibernation_time_ms = millis();   // start power off/hybernation counter
     hibernation_on = false;   // wanking up from hibernation mode
     digitalWrite(stepperENA, LOW);  // power on the stepper motor driver
 }
 
-void StepperMotorRUN()
+void StepperMotorRUN()  //responsible for slow motor rotation
 {   
-    StepperMotor.moveTo(encoderValue);   // step_multiplicator should be never negative (never change destination == uncontrolled rotation without STOP condition: DANGER!!!)
+  if (abs(encoderValue) > 10000)   // prevent overfloat of encoder value
+  {
+    encoderValue = 0;
+    StepperMotor.setCurrentPosition(encoderValue);    // reset the actual motor position
+  }
+  steps = int(round(abs(encoderValue)*step_multiplicator/step_divisor));    // reduce the amount of steps (int)
+  if (bool_CW_direction == true)  // CW motor rotation
+  {
+    StepperMotor.moveTo(steps);
+  }
+  else  
+   {
+    StepperMotor.moveTo(steps * (-1));
+   } 
     StepperMotor.run();
-    
 }
 
 void StepperMotorSTOP() // stop motor rotation, if  direction of rotation encoder has changed
 {
     StepperMotor.stop();
-    delay(500);
+    delay(punish_time_ms);
     encoder_is_moving = false;   // true == encoder has been rotated
     encoderValue = 0;   // prevents the stepper motor to seek for the old position
     StepperMotor.setCurrentPosition(encoderValue);
@@ -231,12 +245,12 @@ void encoderTrigger()   // counts wrong recognized direction signals
         encoderTriggerTimer = millis();
         wrongDirectionFlag++;
         bool_old_direction = !bool_CW_direction;    // new diection is wrong == !bool_CW_direction (opposit of new direction = old direction)
-        if (wrongDirectionFlag > 10)    // after n trigger stop rotation
+        if (wrongDirectionFlag > false_direction_trigger)    // after n trigger stop rotation
         {   
             wrongDirectionFlag = 0;
             StepperMotorSTOP();
         }
-        if (millis() - encoderTriggerTimer > 1000)
+        if (millis() - encoderTriggerTimer > false_direction_time_slot_ms)    // reset the flags if the windows is smaller than the passed by time
         {
             wrongDirectionFlag = 0;
         }  
@@ -272,7 +286,7 @@ void Acceleration()   // acceleration step of the motor
         motor_need_acceleration = false;           // false == no acceleration required == full speed rotation of the motor
         endOfDeacceleration = false;    // false == because now, its runs at full speed // (true when the motor stopped)
     }
-    if (directoinAccelSpeedDeaccel == false)
+    if (directoinAccelSpeedDeaccel == false)    // CCW direction
     {
         digitalWrite(stepperDIR, HIGH);
         encoder_is_moving = false;
@@ -306,6 +320,7 @@ void Deacceleration()
 {
     if (encoder_is_moving == true || digitalRead(button) == 1)
         {
+          encoder_is_moving = false;    // reset flag that encoder has been touched
             for (long i = 0; i <= (de_accel_time_ms); i++)   // start deacceleration
             {
               digitalWrite(stepperPUL, HIGH);
