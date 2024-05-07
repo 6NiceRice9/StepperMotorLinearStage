@@ -2,40 +2,41 @@
 
 -------------------- Instruction --------------------
 
-0. This project was made to control a manual UHV manipulator by a rotary encoder, which is resposible for fine a button for coarse positioning. 
-0. Since the main prioraty of this arduino code was to have a fool proof & SAFE manual operation of a stepper motor.
-1. after booting the arduino, the loop hybernate in a locked safety state
+Here’s an improved version of your description:
 
-   safety state: stepper motor driver = OFF & rotary encoder = OFF   ----> to unlock: press the button 2x times
-   
-3. press the button 2x: unlocking rotary encoder (= coarse movement still blocked) ---> in case the button is broken/ keeps pressed = no operation possible
+---
 
-   Now, the rotation of the rotary encoder moves the stepper motor in one of the direction (using AccelStepper library) which accelerate and deaccelerate gently
-   
-4. after each repositioning of the rotary encoder, the stepper motor keeps powered for 3,2 seconds & shuts down, to prevent unneccessary power consumption.
-   (= every 3 seconds after last operation, the stepper motor shuts down)
-5. Two stepper motor speeds are avaliable:
+This project enables manual control of a UHV manipulator using a rotary encoder attached to an Arduino. The primary goal is to ensure foolproof and safe operation of a stepper motor.
 
-  - fine movement: after shutting down, the rotary encoder has to be moved in one of the two directions to have a fine movement of the stepper motor
-  
-  - coarse movement: in the 3s time slots press and hold the button, the motor accelerate and keeps the predefined speed & deaccelerate @ button release
-  
-    If the button has been pressed & released in this 3s time slot: the motor accelerated and deaccelerates & again 3s time slot is available
-6. Safety features:
+**Initial State after Arduino Boot:**
+- The system enters a hibernation mode in a locked safety state.
+- **Safety State:** Stepper motor driver and rotary encoder are turned off.
+- **Unlock Mechanism:** Double press the button to activate the rotary encoder, keeping coarse movement disabled. If the button malfunctions or remains pressed, the system remains inactive.
 
-  - Emergency stop feature 1: if during the coarse movement, the rotary encoder has been moved: stepper motor deaccelerates and is locked (even the button stay pressed or rotary encoder has moved)
-  
-   To unlock: press the button 1x.
-   
-  - Emergency stop feature 2: during fine movement, the rotary encoder could be rotated 10x in a row ... because of the predefined speed, the motor drives the counted amout of signals of encoder (=delayed motor movement)
-    
-    To stop the motor, rotate slightly in counterclockwise direction. (= motor stops & block the operation for 500 ms & blocks coarse movement till next fine movement)
-    
-    After 500 ms, its unlocked for fine movement by rotary encoder. --> to unlock coarse movement, rotate in the desired direction
-    
-7.  If higher precision is required, the motor could be rotated manually, since the motor is powered off every 3s.
+**Operational Modes:**
+1. **Fine Movement:**
+   - Activated by rotating the rotary encoder after the motor shuts down.
+   - Utilizes the AccelStepper library for gentle acceleration and deceleration.
+   - The stepper motor remains powered for 3.2 seconds post-rotation to minimize unnecessary power consumption, then shuts down.
 
-8. adjust the acceleration & speed !!!
+2. **Coarse Movement:**
+   - During a 3-second window after motor deactivation, press and hold the button to initiate coarse movement.
+   - The motor maintains a preset speed and decelerates upon button release.
+
+**Safety Features:**
+- **Emergency Stop 1:** During coarse movement, any rotary encoder movement causes the stepper motor to decelerate and lock, regardless of button or encoder status. Reset by pressing the button once.
+- **Emergency Stop 2:** During fine movement, rotating the rotary encoder rapidly (10x in succession) triggers a delayed response based on the encoder signal count. To halt the motor immediately, rotate it slightly counterclockwise, which also disables coarse movement for 500 ms.
+
+**Reactivation:**
+- After 500 ms, the system re-enables fine movement. Coarse movement can be reactivated by rotating the encoder in the intended direction.
+
+**Manual Adjustment:**
+- For precise adjustments, the motor can be rotated manually, taking advantage of the 3-second power-off intervals.
+
+**Recommendations:**
+- It's advisable to refine the settings for acceleration and speed to optimize performance based on specific operational requirements.
+
+This configuration ensures that the stepper motor operates efficiently while maintaining high safety standards through controlled mechanisms and emergency interventions.
 
 ------------------------------------------------------
 
