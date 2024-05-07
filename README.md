@@ -1,6 +1,6 @@
 ## Steper motor operates a linear actuator
 
--------------------- Instruction --------------------
+
 This project enables manual control of a UHV manipulator using a rotary encoder attached to an Arduino. The primary goal is to ensure foolproof and safe operation of a stepper motor.
 
 **Initial State after Arduino Boot:**
